@@ -1,0 +1,8 @@
+[Lecture 1: Memory and learning]
+Retrieval practice means trying to bring previously learned information to mind without looking at the answer. It strengthens later access to that information.
+Spaced practice distributes learning sessions over time. Massed practice groups repetitions into one concentrated session.
+Recognition is identifying the correct answer when it is presented among alternatives. Recall is producing the answer without alternatives.
+Working memory temporarily holds and manipulates a limited amount of information. Long-term memory stores information over longer periods.
+A retrieval cue is a prompt that helps access stored information. A useful cue should identify the target clearly without stating the answer.
+Corrective feedback provides the correct answer after a retrieval attempt. It can repair an incorrect response.
+Transfer is applying learned knowledge to a new context. An application question can test transfer when it requires using a principle in a new situation.

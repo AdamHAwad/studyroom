@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+.DS_Store
+*.log
+.venv/
+scripts/__pycache__/
+scripts/ocr
