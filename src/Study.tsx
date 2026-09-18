@@ -32,7 +32,13 @@ import { modes } from './study-modes';
 import CardVisual from './components/CardVisual';
 import RichText from './RichText';
 import type { Card, StudySet } from './types';
-type QuestionKind = 'mcq' | 'written' | 'tf';
+type QuestionKind = 'mcq' | 'written' | 'tf' | 'match';
+type MatchBlock = {
+  stem: string;
+  items: { cardId: string; text: string; answer: string }[];
+  choices: { label: string; text: string }[];
+  coveredIds: string[];
+};
 type Question = Card & {
   options: string[];
   answerKind?: QuestionKind;
@@ -40,6 +46,7 @@ type Question = Card & {
   answer?: string;
   answerSide?: 'term' | 'definition';
   pair?: string;
+  match?: MatchBlock;
 };
 type Session = {
   id: string;
@@ -225,6 +232,17 @@ export default function Study() {
                     onChange={() => toggleQuestionType('tf')}
                   />
                 </label>
+                {mode === 'learn' && (
+                  <label className="option-row">
+                    Matching
+                    <input
+                      className="switch"
+                      type="checkbox"
+                      checked={questionTypes.includes('match')}
+                      onChange={() => toggleQuestionType('match')}
+                    />
+                  </label>
+                )}
                 <label className="option-row">
                   Answer with
                   <select value={direction} onChange={(e) => setDirection(e.target.value)}>
@@ -343,11 +361,12 @@ async function attempt(
   response: string,
   durationMs: number,
   extra: any = {},
+  cardId = card.id,
 ) {
   const payload = {
     id: crypto.randomUUID(),
     sessionId: session.id,
-    cardId: card.id,
+    cardId,
     kind,
     response,
     durationMs: Math.max(0, Math.min(durationMs, 86400000)),
@@ -648,6 +667,7 @@ function Learn({
   const [selected, setSelected] = useState<string | null>(null),
     [feedback, setFeedback] = useState<any>(null),
     [written, setWritten] = useState(''),
+    [picks, setPicks] = useState<Record<string, string>>({}),
     [busy, setBusy] = useState(false);
   const since = useRef(Date.now());
   const done = state.done || [];
@@ -655,6 +675,8 @@ function Learn({
   const kind = card.answerKind || 'mcq';
   const isWritten = kind === 'written';
   const isTrueFalse = kind === 'tf';
+  const isMatch = kind === 'match' && Boolean(card.match);
+  const totalTerms = session.cards.reduce((n, c) => n + (c.match?.coveredIds.length ?? 1), 0);
   const options = isTrueFalse
     ? card.options
     : seededShuffle(card.options, `${session.id}:${card.id}:${state.answersCount || 0}`);
@@ -678,6 +700,42 @@ function Learn({
       setBusy(false);
     }
   }
+  async function answerMatch() {
+    if (feedback || busy || !card.match) return;
+    const pairs = card.match.items.map((item) => ({
+      item,
+      choice: card.match!.choices.find((choice) => choice.label === picks[item.cardId])!,
+    }));
+    if (pairs.some((pair) => !pair.choice)) {
+      toast.error('Choose an option for every item first.');
+      return;
+    }
+    setBusy(true);
+    try {
+      const elapsed = Math.max(
+        1,
+        Math.round((Date.now() - since.current) / card.match.items.length),
+      );
+      const results = await Promise.all(
+        pairs.map(({ item, choice }) =>
+          attempt(session, card, 'match', choice.text, elapsed, {}, item.cardId),
+        ),
+      );
+      const match = pairs.map(({ item, choice }, i) => ({
+        cardId: item.cardId,
+        selected: choice.label,
+        answer: item.answer,
+        correct: (results[i] as any)?.correct === true,
+      }));
+      const result = { correct: match.every((entry) => entry.correct), match };
+      setFeedback(result);
+      await save({ ...state, feedback: result, selected: null });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
   useEffect(() => {
     if (state.feedback) {
       setFeedback(state.feedback);
@@ -687,6 +745,7 @@ function Learn({
       setSelected(null);
       setWritten('');
     }
+    setPicks({});
   }, [index]);
   async function next() {
     if (busy || !feedback) return;
@@ -694,12 +753,20 @@ function Learn({
     try {
       const q = [...queue];
       let nextDone = [...done];
-      if (feedback.correct) nextDone = [...new Set([...done, card.id])];
+      if (feedback.correct)
+        nextDone = [...new Set([...done, ...(card.match?.coveredIds ?? [card.id])])];
       else q.splice(Math.min(index + 4, q.length), 0, card.id);
       const complete = index + 1 >= q.length;
-      const answersCount = (state.answersCount || 0) + 1;
-      const correctCount = (state.correctCount || 0) + Number(feedback.correct);
-      const checkpointDue = !complete && answersCount % CHECKPOINT_EVERY === 0;
+      const answered = card.match ? card.match.items.length : 1;
+      const correctItems = card.match
+        ? feedback.match.filter((entry: any) => entry.correct).length
+        : Number(feedback.correct);
+      const answersCount = (state.answersCount || 0) + answered;
+      const correctCount = (state.correctCount || 0) + correctItems;
+      const checkpointDue =
+        !complete &&
+        Math.floor(answersCount / CHECKPOINT_EVERY) >
+          Math.floor((state.answersCount || 0) / CHECKPOINT_EVERY);
       await save(
         {
           ...state,
@@ -717,6 +784,7 @@ function Learn({
       setSelected(null);
       setFeedback(null);
       setWritten('');
+      setPicks({});
       since.current = Date.now();
     } catch (e) {
       toast.error((e as Error).message);
@@ -742,7 +810,7 @@ function Learn({
       if (feedback && e.key === 'Enter') {
         e.preventDefault();
         void next();
-      } else if (!feedback && !isWritten && ['1', '2', '3', '4'].includes(e.key)) {
+      } else if (!feedback && !isWritten && !isMatch && ['1', '2', '3', '4'].includes(e.key)) {
         const choice = options[Number(e.key) - 1];
         if (choice) void answer(choice);
       }
@@ -755,11 +823,11 @@ function Learn({
       <div className="learn-top">
         <span>ROUND IN PROGRESS</span>
         <strong>
-          {done.length} / {session.cards.length} learned this round
+          {done.length} / {totalTerms} learned this round
         </strong>
       </div>
       <div className="progress-track">
-        <div style={{ width: `${(done.length / session.cards.length) * 100}%` }} />
+        <div style={{ width: `${(done.length / totalTerms) * 100}%` }} />
       </div>
       {checkpoint ? (
         <motion.section
@@ -772,11 +840,15 @@ function Learn({
           </div>
           <span className="eyebrow">CHECKPOINT</span>
           <h1>
-            {checkpointCopy[(checkpoint.answers / CHECKPOINT_EVERY - 1) % checkpointCopy.length]}
+            {
+              checkpointCopy[
+                (Math.floor(checkpoint.answers / CHECKPOINT_EVERY) - 1) % checkpointCopy.length
+              ]
+            }
           </h1>
           <p>
             {checkpoint.correct} of {checkpoint.answers} correct so far · {done.length} of{' '}
-            {session.cards.length} terms learned this round.
+            {totalTerms} terms learned this round.
           </p>
           <button
             className="button primary"
@@ -791,73 +863,188 @@ function Learn({
         <section className="question-panel">
           <div className="question-meta">
             <span>
-              {isWritten ? 'Written question' : isTrueFalse ? 'True or false' : 'Multiple choice'}
+              {isWritten
+                ? 'Written question'
+                : isTrueFalse
+                  ? 'True or false'
+                  : isMatch
+                    ? 'Matching'
+                    : 'Multiple choice'}
             </span>
             <span>{card.topic}</span>
           </div>
           <CardVisual card={card} side="question" />
-          <h2>
-            <RichText text={promptOf(card)} />
-          </h2>
-          {isTrueFalse && card.pair && (
-            <p className="tf-pair">
-              “<RichText text={card.pair} />”
-            </p>
-          )}
-          {isWritten ? (
-            <form
-              className="written-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void answer(written);
-              }}
-            >
-              <label className="sr-only" htmlFor="written-answer">
-                Your answer
-              </label>
-              <input
-                id="written-answer"
-                autoFocus
-                placeholder="Type your answer"
-                value={written}
-                disabled={Boolean(feedback) || busy}
-                onChange={(e) => setWritten(e.target.value)}
-              />
+          {isMatch ? (
+            <div className="learn-match">
+              <p className="match-direction">
+                <RichText text={card.match!.stem} />
+              </p>
+              <div className="match-grid" role="group" aria-label="Matching items and options">
+                {Array.from({
+                  length: Math.max(card.match!.items.length, card.match!.choices.length),
+                }).map((_, i) => {
+                  const item = card.match!.items[i];
+                  const choice = card.match!.choices[i];
+                  const result = item
+                    ? feedback?.match?.find((entry: any) => entry.cardId === item.cardId)
+                    : undefined;
+                  const picked = item ? picks[item.cardId] || result?.selected || '' : '';
+                  const correct = choice
+                    ? feedback?.match?.some((entry: any) => entry.answer === choice.label)
+                    : false;
+                  const selectedEntry = choice
+                    ? feedback?.match?.find((entry: any) => entry.selected === choice.label)
+                    : undefined;
+                  const wrong = Boolean(selectedEntry && !selectedEntry.correct && !correct);
+                  const chosen = Boolean(
+                    choice &&
+                    (Object.values(picks).includes(choice.label) ||
+                      feedback?.match?.some((entry: any) => entry.selected === choice.label)),
+                  );
+                  return (
+                    <div className="match-row" key={i}>
+                      {item ? (
+                        <div
+                          className={`match-item ${result ? (result.correct ? 'correct' : 'incorrect') : ''}`}
+                        >
+                          <span className="match-marker">
+                            {result ? (
+                              result.correct ? (
+                                <Check size={15} />
+                              ) : (
+                                <X size={15} />
+                              )
+                            ) : (
+                              i + 1
+                            )}
+                          </span>
+                          <span className="match-item-text">
+                            <RichText text={item.text} />
+                          </span>
+                          <span className={`match-select ${picked ? 'filled' : ''}`}>
+                            <select
+                              aria-label={`Option for item ${i + 1}`}
+                              value={picked}
+                              disabled={Boolean(feedback) || busy}
+                              onChange={(e) =>
+                                setPicks({ ...picks, [item.cardId]: e.target.value })
+                              }
+                            >
+                              <option value="">—</option>
+                              {card.match!.choices.map((option) => (
+                                <option key={option.label} value={option.label}>
+                                  {option.label}
+                                </option>
+                              ))}
+                            </select>
+                          </span>
+                          {result && !result.correct && (
+                            <small className="match-correction">
+                              Correct: <b>{result.answer}</b>
+                            </small>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="match-item empty" aria-hidden="true" />
+                      )}
+                      {choice ? (
+                        <div
+                          className={`match-option ${correct ? 'correct' : ''} ${
+                            wrong ? 'incorrect' : ''
+                          } ${chosen && !correct && !wrong ? 'chosen' : ''}`}
+                        >
+                          <span className="match-marker">{choice.label}</span>
+                          <span className="match-option-text">
+                            <RichText text={choice.text} />
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="match-option empty" aria-hidden="true" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="match-note">
+                An option may be used once, more than once, or not at all.
+              </p>
               {!feedback && (
-                <button className="button primary" disabled={!written.trim() || busy}>
-                  Check answer
+                <button
+                  className="button primary"
+                  disabled={busy || card.match!.items.some((item) => !picks[item.cardId])}
+                  onClick={() => void answerMatch()}
+                >
+                  Check answers
                   <ArrowRight size={18} />
                 </button>
               )}
-            </form>
+            </div>
           ) : (
             <>
-              <p className="choice-instruction">
-                {isTrueFalse ? 'Is this pairing correct?' : 'Choose the correct answer'}
-              </p>
-              <div className="answer-options">
-                {options.map((o, i) => (
-                  <button
-                    key={o}
-                    className={`answer-option ${feedback ? (o === answerOf(card) ? 'correct' : o === selected ? 'incorrect' : 'faded') : ''}`}
+              <h2>
+                <RichText text={promptOf(card)} />
+              </h2>
+              {isTrueFalse && card.pair && (
+                <p className="tf-pair">
+                  “<RichText text={card.pair} />”
+                </p>
+              )}
+              {isWritten ? (
+                <form
+                  className="written-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void answer(written);
+                  }}
+                >
+                  <label className="sr-only" htmlFor="written-answer">
+                    Your answer
+                  </label>
+                  <input
+                    id="written-answer"
+                    autoFocus
+                    placeholder="Type your answer"
+                    value={written}
                     disabled={Boolean(feedback) || busy}
-                    onClick={() => void answer(o)}
-                  >
-                    <span className="option-number">
-                      {feedback && o === answerOf(card) ? (
-                        <Check size={17} />
-                      ) : feedback && o === selected ? (
-                        <X size={17} />
-                      ) : (
-                        i + 1
-                      )}
-                    </span>
-                    <span>
-                      <RichText text={o} />
-                    </span>
-                  </button>
-                ))}
-              </div>
+                    onChange={(e) => setWritten(e.target.value)}
+                  />
+                  {!feedback && (
+                    <button className="button primary" disabled={!written.trim() || busy}>
+                      Check answer
+                      <ArrowRight size={18} />
+                    </button>
+                  )}
+                </form>
+              ) : (
+                <>
+                  <p className="choice-instruction">
+                    {isTrueFalse ? 'Is this pairing correct?' : 'Choose the correct answer'}
+                  </p>
+                  <div className="answer-options">
+                    {options.map((o, i) => (
+                      <button
+                        key={o}
+                        className={`answer-option ${feedback ? (o === answerOf(card) ? 'correct' : o === selected ? 'incorrect' : 'faded') : ''}`}
+                        disabled={Boolean(feedback) || busy}
+                        onClick={() => void answer(o)}
+                      >
+                        <span className="option-number">
+                          {feedback && o === answerOf(card) ? (
+                            <Check size={17} />
+                          ) : feedback && o === selected ? (
+                            <X size={17} />
+                          ) : (
+                            i + 1
+                          )}
+                        </span>
+                        <span>
+                          <RichText text={o} />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </>
           )}
           {feedback && (
@@ -870,28 +1057,45 @@ function Learn({
                 <span>
                   {feedback.correct ? <CheckCircle2 size={22} /> : <RotateCcw size={22} />}
                 </span>
-                <h3>{feedback.correct ? 'You got it.' : 'You’re still learning this one.'}</h3>
+                <h3>
+                  {isMatch
+                    ? feedback.correct
+                      ? 'You matched them all.'
+                      : 'A few pairs still need work.'
+                    : feedback.correct
+                      ? 'You got it.'
+                      : 'You’re still learning this one.'}
+                </h3>
               </div>
-              {!feedback.correct && (
-                <p>
-                  <strong>Correct answer</strong>
-                  <br />
-                  {answerOf(card)}
-                </p>
-              )}
-              {isWritten && !feedback.correct && (
+              {isMatch
+                ? !feedback.correct && (
+                    <p>
+                      <strong>Keep going</strong>
+                      <br />
+                      The letters marked in red are corrected next to each item. Missed items return
+                      later in this round.
+                    </p>
+                  )
+                : !feedback.correct && (
+                    <p>
+                      <strong>Correct answer</strong>
+                      <br />
+                      {answerOf(card)}
+                    </p>
+                  )}
+              {!isMatch && isWritten && !feedback.correct && (
                 <small>
                   Written grading matches the answer or its saved aliases. Add an accepted
                   equivalent in the set editor if needed.
                 </small>
               )}
-              <CardVisual card={card} side="answer" />
-              {card.explanation && (
+              {!isMatch && <CardVisual card={card} side="answer" />}
+              {!isMatch && card.explanation && (
                 <p>
                   <RichText text={card.explanation} />
                 </p>
               )}
-              <SourceLinks card={card} />
+              {!isMatch && <SourceLinks card={card} />}
               <button className="button primary" disabled={busy} onClick={() => void next()}>
                 Continue
                 <ArrowRight size={18} />
@@ -906,7 +1110,9 @@ function Learn({
           ? 'Recall the whole idea, including any essential conditions.'
           : isTrueFalse
             ? 'Decide whether the pairing is correct. Keys 1 and 2 work too.'
-            : 'Use keys 1–4 to answer and Enter to continue.'}
+            : isMatch
+              ? 'Give every item a letter, then check your answers.'
+              : 'Use keys 1–4 to answer and Enter to continue.'}
       </p>
     </div>
   );

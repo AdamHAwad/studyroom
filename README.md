@@ -43,6 +43,7 @@ Everything runs locally except the AI calls. The app itself is a local web serve
 - **Four real study modes.** Flashcards, Learn, Match, and Test, with starred terms, audio, keyboard play, and saved in-progress sessions.
 - **Metrics you can trust.** Practice accuracy counts objective answers only. Self-ratings never inflate it. Retained status is a documented heuristic, inspectable in the open code.
 - **An AI coach that knows your data.** Study insights chat answers with evidence from your actual attempts and links to the exact set, card, or mode you need.
+- **Updates itself.** Studyroom checks its own GitHub `main` on launch and can update and restart in place when a new version is ready.
 - **Your data stays yours.** One SQLite file on your machine. JSONL export, daily backups, and a settings-page export button, all built in.
 
 ## Quick start

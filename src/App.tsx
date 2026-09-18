@@ -32,6 +32,7 @@ import {
   SettingsPage,
 } from './pages';
 import Study from './Study';
+import UpdateNotice from './components/UpdateNotice';
 type Context = { data: AppData; refresh: () => Promise<void>; newCourse: () => void };
 const Ctx = createContext<Context>(null!);
 export const useApp = () => useContext(Ctx);
@@ -123,6 +124,7 @@ export default function App() {
               <Plus size={19} />
               Create
             </button>
+            <UpdateNotice />
             <Link to="/settings" className="avatar" aria-label="Your settings">
               {(data.settings.name || 'A').slice(0, 1).toUpperCase()}
             </Link>

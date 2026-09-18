@@ -15,6 +15,7 @@ import { snapshot, agentSnapshot } from './snapshot';
 import { extract, extensions } from './extract';
 import { extractAssets } from './assets';
 import { enqueue, recoverJobs, cancelJob, shutdownAgents } from './agents';
+import { updateStatus, checkForUpdate, applyUpdate, recoverUpdate } from './update';
 import {
   agentStatus,
   modelsFor,
@@ -388,11 +389,11 @@ app.post('/api/sessions', (req, res) => {
       starred: z.boolean().default(false),
       count: z.number().int().min(1).optional(),
       direction: z.enum(['term', 'definition']).default('term'),
-      questionType: z.enum(['adaptive', 'mcq', 'written', 'tf']).optional(),
+      questionType: z.enum(['adaptive', 'mcq', 'written', 'tf', 'match']).optional(),
       questionTypes: z
-        .array(z.enum(['mcq', 'written', 'tf']))
+        .array(z.enum(['mcq', 'written', 'tf', 'match']))
         .min(1)
-        .max(3)
+        .max(4)
         .optional(),
       shuffle: z.boolean().default(false),
       sorting: z.boolean().default(true),
@@ -528,16 +529,21 @@ app.post('/api/attempts', (req, res) => {
   if (prior) return res.json(prior);
   const s = requireItem('sessions', b.sessionId);
   if (s.mode === 'test') throw Error('Submit the complete test instead');
-  const c = s.cards.find((c: SessionQuestion) => c.id === b.cardId);
+  const c: SessionQuestion | undefined = s.cards.find(
+    (c: SessionQuestion) =>
+      c.id === b.cardId || c.match?.items.some((item) => item.cardId === b.cardId),
+  );
   if (!c) throw Error('This card is not in the session');
   if (s.completedAt) throw Error('This study session has ended');
   const expected: Record<string, string[]> = {
     flashcards: ['view', 'self'],
-    learn: ['mcq', 'written'],
+    learn: ['mcq', 'written', 'match'],
     match: ['match'],
   };
   if (!expected[s.mode]?.includes(b.kind)) throw Error('Answer type does not match the session');
   const answerSide = c.answerSide || 'definition';
+  const matchItem = c.match?.items.find((item) => item.cardId === b.cardId);
+  const target = get<Card>('cards', b.cardId);
   const correct =
     b.kind === 'view'
       ? null
@@ -546,12 +552,19 @@ app.post('/api/attempts', (req, res) => {
         : b.kind === 'written'
           ? writtenCorrect(c, b.response, answerSide)
           : b.kind === 'match'
-            ? b.matchedCardId === c.id
+            ? matchItem
+              ? (() => {
+                  const chosen =
+                    c.match!.choices.find((choice) => choice.text === b.response) ??
+                    c.match!.choices.find((choice) => choice.label === b.response);
+                  return Boolean(chosen && chosen.label === matchItem.answer);
+                })()
+              : b.matchedCardId === c.id
             : b.response === (c.answer ?? c.definition);
   const a: Attempt = {
     id: b.id,
     sessionId: s.id,
-    cardId: c.id,
+    cardId: b.cardId,
     setId: s.setId,
     courseId: s.courseId,
     mode: s.mode,
@@ -560,19 +573,27 @@ app.post('/api/attempts', (req, res) => {
     correct,
     durationMs: b.durationMs,
     createdAt: now(),
-    cardVersion: c.version,
+    cardVersion: target?.version ?? c.version,
   };
   transaction(() => {
     put('attempts', {
       ...a,
-      cardSnapshot: { term: c.term, definition: c.definition },
+      cardSnapshot: matchItem
+        ? { term: matchItem.text, definition: b.response }
+        : { term: c.term, definition: c.definition },
       ...(b.kind === 'match' ? { matchedCardId: b.matchedCardId } : {}),
     });
-    const current = get<Card>('cards', c.id);
-    if (current?.version === c.version)
-      put('progress', { ...advance(get('progress', c.id), a), id: c.id });
+    const current = get<Card>('cards', a.cardId);
+    if (current?.version === a.cardVersion)
+      put('progress', { ...advance(get('progress', a.cardId), a), id: a.cardId });
   });
-  res.json({ ...a, answer: c.answer ?? c.definition, explanation: c.explanation });
+  res.json({
+    ...a,
+    answer: matchItem
+      ? c.match!.choices.find((choice) => choice.label === matchItem.answer)?.text || ''
+      : (c.answer ?? c.definition),
+    explanation: c.explanation,
+  });
 });
 app.post('/api/sessions/:id/submit', (req, res) => {
   const s = requireItem('sessions', req.params.id);
@@ -666,6 +687,13 @@ app.get('/api/export', (_req, res) => {
 app.post('/api/backup', (_req, res) => {
   backup();
   res.json({ ok: true });
+});
+app.get('/api/update', async (_req, res) => res.json(await updateStatus()));
+app.post('/api/update/check', async (_req, res) => res.json(await checkForUpdate()));
+app.post('/api/update/apply', async (_req, res) => {
+  if (all<Job>('jobs').some((j) => ['queued', 'running'].includes(j.status)))
+    throw Error('Finish or cancel active AI jobs before updating.');
+  res.json(await applyUpdate());
 });
 app.get('/api/settings', (_req, res) =>
   res.json({
@@ -780,6 +808,7 @@ for (const source of all<Source>('sources'))
       error: 'File processing was interrupted by a restart. Upload this file again.',
     });
 backup();
+recoverUpdate();
 recoverJobs();
 const daily = setInterval(backup, 60 * 60 * 1000);
 daily.unref();

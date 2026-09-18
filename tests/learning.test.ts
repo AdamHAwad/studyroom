@@ -173,3 +173,71 @@ test('true or false questions label the pairing honestly', () => {
     assert(['A', 'B'].includes(q.pair!));
   }
 });
+test('learn matching builds a worksheet block from related cards with an extra option', () => {
+  const cards = Array.from({ length: 6 }, (_, n) => ({
+    id: `c${n}`,
+    term: `Term ${n + 1}`,
+    definition: `Definition ${n + 1}`,
+    question: '',
+    distractors: [],
+    aliases: [],
+    topic: 'Brain areas',
+  })) as unknown as Card[];
+  const questions = buildSessionQuestions(cards, cards, {
+    mode: 'learn',
+    direction: 'term',
+    questionTypes: ['match'],
+    familiar: () => false,
+  });
+  assert.equal(questions.length, 2);
+  const block = questions.find((q) => q.answerKind === 'match')!;
+  const match = block.match!;
+  assert.equal(match.items.length, 5);
+  assert.equal(match.coveredIds.length, 5);
+  assert.equal(new Set(match.coveredIds).size, 5);
+  assert.equal(match.choices.length, 6);
+  assert.deepEqual(
+    match.choices.map((choice) => choice.label),
+    ['A', 'B', 'C', 'D', 'E', 'F'],
+  );
+  for (const item of match.items) {
+    const chosen = match.choices.find((choice) => choice.label === item.answer)!;
+    const card = cards.find((c) => c.id === item.cardId)!;
+    assert.equal(item.text, card.term);
+    assert.equal(chosen.text, card.definition);
+  }
+  const single = questions.find((q) => q.id !== block.id)!;
+  assert.equal(single.answerKind, 'mcq');
+});
+test('learn matching follows the chosen answer side and never appears in tests', () => {
+  const cards = Array.from({ length: 4 }, (_, n) => ({
+    id: `d${n}`,
+    term: `Term ${n + 1}`,
+    definition: `Definition ${n + 1}`,
+    question: '',
+    distractors: [],
+    aliases: [],
+    topic: 'Divisions',
+  })) as unknown as Card[];
+  const [block] = buildSessionQuestions(cards, cards, {
+    mode: 'learn',
+    direction: 'definition',
+    questionTypes: ['match'],
+    familiar: () => false,
+  });
+  assert.equal(block.answerKind, 'match');
+  const match = block.match!;
+  assert.equal(match.items[0].text, 'Definition 1');
+  const chosen = match.choices.find((choice) => choice.label === match.items[0].answer)!;
+  assert.equal(chosen.text, 'Term 1');
+  const testQuestions = buildSessionQuestions(cards, cards, {
+    mode: 'test',
+    direction: 'term',
+    questionTypes: ['match'],
+    familiar: () => false,
+  });
+  assert.equal(
+    testQuestions.every((q) => q.answerKind !== 'match'),
+    true,
+  );
+});

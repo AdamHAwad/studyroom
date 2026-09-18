@@ -216,3 +216,66 @@ test('learn sessions cover the whole set, respect answer side, and test grades e
     true,
   );
 });
+test('learn matching records one graded attempt per matched item', async () => {
+  const c = await call('/courses', { name: 'Matching test' });
+  const s = await call('/sets', {
+    courseId: c.id,
+    title: 'Brain areas',
+    cards: Array.from({ length: 6 }, (_, i) => ({
+      term: `Area ${i + 1}`,
+      definition: `Function ${i + 1}`,
+      distractors: ['Off one', 'Off two', 'Off three'],
+      topic: 'Brain areas',
+    })),
+  });
+  const learn = await call('/sessions', {
+    setId: s.id,
+    mode: 'learn',
+    questionTypes: ['match'],
+  });
+  const block = learn.cards.find((q: any) => q.answerKind === 'match');
+  assert.ok(block);
+  assert.equal(block.match.items.length, 5);
+  assert.equal(block.match.coveredIds.length, 5);
+  assert.equal(
+    new Set(block.match.choices.map((choice: any) => choice.label)).size,
+    block.match.choices.length,
+  );
+  const [first, ...rest] = block.match.items;
+  const wrong = block.match.choices.find((choice: any) => choice.label !== first.answer);
+  const missed = await call('/attempts', {
+    id: crypto.randomUUID(),
+    sessionId: learn.id,
+    cardId: first.cardId,
+    kind: 'match',
+    response: wrong.text,
+    durationMs: 400,
+  });
+  assert.equal(missed.correct, false);
+  for (const item of rest) {
+    const choice = block.match.choices.find((entry: any) => entry.label === item.answer);
+    const attempt = await call('/attempts', {
+      id: crypto.randomUUID(),
+      sessionId: learn.id,
+      cardId: item.cardId,
+      kind: 'match',
+      response: choice.text,
+      durationMs: 400,
+    });
+    assert.equal(attempt.correct, true);
+    assert.equal(attempt.cardId, item.cardId);
+  }
+  const progress = (await call('/bootstrap')).progress.filter((p: any) =>
+    block.match.coveredIds.includes(p.cardId),
+  );
+  assert.equal(progress.length, 5);
+  assert.equal(progress.find((p: any) => p.cardId === first.cardId).lastCorrect, false);
+  assert.equal(
+    progress.filter((p: any) => p.cardId !== first.cardId).every((p: any) => p.lastCorrect),
+    true,
+  );
+  assert.equal(
+    progress.every((p: any) => p.recognitionAttempts === 1),
+    true,
+  );
+});

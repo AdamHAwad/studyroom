@@ -10,6 +10,20 @@ Do not move this project without rerunning the install command; both launchers c
 
 Development: `npm run build`, `npm test`. Build creates the production browser bundle. Restart the service after server changes (on macOS: `launchctl kickstart -k gui/$(id -u)/local.studyroom.app`), after active jobs finish. Do not run a second server on port 3210 while the LaunchAgent is running. For isolated testing, use a separate `STUDYROOM_DATA` folder and `PORT`.
 
+## Updates
+
+Studyroom checks its GitHub `main` branch when the app opens. When a newer commit exists, the home page shows an update notice; choosing Update fetches and fast-forwards this checkout, reinstalls dependencies only if they changed, builds the new bundle, and restarts the server, after which the page reloads. Progress lands in `data/update.json` and `data/logs/update.log`.
+
+The updater refuses to run when tracked files have local changes or local commits, so your copy is never overwritten silently. To update by hand instead:
+
+```sh
+git pull --ff-only
+npm install
+npm run build
+```
+
+On macOS the app restarts through the LaunchAgent when one is installed; otherwise it stops the current process and starts a new one on the same port. The `data` folder is never touched. Automatic updates need Git and network access; studying itself still works offline.
+
 ## Files and backups
 
 `data` contains everything personal. Original files are in `data/uploads`. Normalized/cropped visuals are in `data/assets`. Job receipts are in `data/jobs`. Daily SQLite snapshots are in `data/backups`. The app never automatically deletes these backups.
