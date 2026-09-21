@@ -16,6 +16,7 @@ else if (command === 'attempts') {
   for (const table of [
     'courses',
     'sets',
+    'documents',
     'cards',
     'sources',
     'assets',

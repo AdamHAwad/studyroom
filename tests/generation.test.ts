@@ -142,6 +142,48 @@ test('generation splits a stuck part so the set still arrives', async () => {
   assert.ok(saved);
   assert.equal(all<any>('cards').filter((card) => card.setId === saved.id).length, 2);
   assert.equal(smallParts, 2);
+  const pipeline = JSON.parse(
+    fs.readFileSync(path.join(dir, 'jobs', job.id, 'pipeline.json'), 'utf8'),
+  );
+  const parentPath = path.join(
+    dir,
+    'jobs',
+    job.id,
+    `batch-${pipeline.states[0].key}-checkpoint.json`,
+  );
+  assert.ok(fs.existsSync(parentPath), 'Split completion saves a parent checkpoint');
+  fs.unlinkSync(parentPath); // Reproduce checkpoints written by older versions.
+  const resumed = {
+    ...job,
+    id: 'split-resumed',
+    payload: { ...job.payload, resumeFromJobId: job.id },
+  };
+  put('jobs', resumed);
+  await generateSet(resumed, async () => {
+    throw Error('Saved split children and review must resume without model calls');
+  });
+  assert.equal(all<any>('jobs').find((item) => item.id === resumed.id).status, 'completed');
+
+  // A partially finished split must call only its missing child, never the parent.
+  const childFiles = fs
+    .readdirSync(path.join(dir, 'jobs', job.id))
+    .filter((name) => name.startsWith('batch-') && name.endsWith('-checkpoint.json'));
+  fs.unlinkSync(path.join(dir, 'jobs', job.id, childFiles[0]));
+  const partial = {
+    ...job,
+    id: 'split-partial',
+    payload: { ...job.payload, resumeFromJobId: job.id },
+  };
+  put('jobs', partial);
+  let missingCalls = 0;
+  await generateSet(partial, async (options: any) => {
+    assert.equal(options.request.evidence.length, 1, 'Do not retry the large parent');
+    assert.equal(all<any>('jobs').find((item) => item.id === partial.id).details.stagedCards, 1);
+    missingCalls++;
+    return fake(options);
+  });
+  assert.equal(missingCalls, 1);
+
   assert.equal(all<any>('jobs').find((item) => item.id === job.id).status, 'completed');
 });
 

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { all, get, put, id, now, transaction } from './db';
 import { agentSnapshot } from './snapshot';
-import { generateSet } from './generation';
+import { generateStudySet, generateDocument } from './material-generation';
 import { evidenceUnits, auditOutput } from './generation-contract';
 import type { Asset } from './assets';
 import fs from 'node:fs';
@@ -179,18 +179,15 @@ async function reviewExistingSet(job: Job) {
     updatedAt: now(),
   });
   patchJob(job.id, {
-    status: qualityReview === 'passed' ? 'completed' : 'failed',
+    status: 'completed',
     stage: qualityReview === 'passed' ? 'Quality review passed' : 'Review found issues to repair',
     progress: 100,
     resultId: set.id,
-    error:
-      qualityReview === 'passed'
-        ? null
-        : 'The reviewer found issues. See the job log and edit the flagged cards.',
+    error: null,
   });
 }
 
-export function enqueue(kind: 'set' | 'chat' | 'review', courseId: string | null, payload: any) {
+export function enqueue(kind: Job['kind'], courseId: string | null, payload: any) {
   const job: Job = {
     id: id(),
     kind,
@@ -223,7 +220,9 @@ export async function runQueue() {
         startedAt: now(),
       });
       try {
-        if (job.kind === 'set') await generateSet(job);
+        if (job.kind === 'set') await generateStudySet(job);
+        else if (job.kind === 'practice-exam' || job.kind === 'retrieval-packet')
+          await generateDocument(job);
         else if (job.kind === 'review') await reviewExistingSet(job);
         else await chat(job);
       } catch (error) {
@@ -247,10 +246,9 @@ export function recoverJobs() {
   for (const job of all<Job>('jobs')) {
     if (job.status === 'running')
       patchJob(job.id, {
-        status: 'failed',
-        stage: 'Interrupted by a restart · retry continues where it left off',
-        error:
-          'The app restarted while this job was running. Retry to continue from its checkpoints.',
+        status: 'queued',
+        stage: 'Resuming saved work after restart',
+        error: null,
       });
   }
   void runQueue();

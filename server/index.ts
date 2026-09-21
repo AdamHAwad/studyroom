@@ -1,4 +1,5 @@
 import express from 'express';
+import { renderDocument } from './document-print';
 import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,7 +27,16 @@ import {
   currentHarness,
   stopHarnessProcesses,
 } from './harness';
-import type { Card, Job, Source, StudySet, Course, Attempt, CardProgress } from '../src/types';
+import type {
+  Card,
+  Job,
+  Source,
+  StudySet,
+  Course,
+  Attempt,
+  CardProgress,
+  StudyDocument,
+} from '../src/types';
 const app = express();
 const PORT = Number(process.env.PORT || 3210);
 app.disable('x-powered-by');
@@ -98,6 +108,15 @@ app.get('/api/bootstrap', (_req, res) => {
   res.json({
     ...data,
     jobs: all('jobs').slice(-30).reverse(),
+    documents: all<StudyDocument>('documents')
+      .filter((d) => !d.archived && data.courses.some((c) => c.id === d.courseId))
+      .map(({ content, ...d }) => ({
+        ...d,
+        itemCount:
+          d.kind === 'retrieval-packet'
+            ? content.terms.length
+            : content.sections.reduce((n, section) => n + section.questions.length, 0),
+      })),
     settings: Object.fromEntries(all('settings').map((x) => [x.id, x.value])),
   });
 });
@@ -146,6 +165,7 @@ app.get('/api/archive', (_req, res) =>
   res.json({
     courses: all('courses').filter((c) => c.archived),
     sets: all('sets').filter((s) => s.archived),
+    documents: all('documents').filter((d) => d.archived),
   }),
 );
 app.get('/api/sets/:id', (req, res) => {
@@ -285,6 +305,8 @@ app.post('/api/jobs/set', (req, res) => {
   const b = z
     .object({
       courseId: z.string(),
+      kind: z.enum(['set', 'practice-exam', 'retrieval-packet']).default('set'),
+      referenceSourceIds: z.array(z.string()).default([]),
       title: z.string().trim().min(1).max(200),
       instructions: z.string().max(5000).default(''),
       sourceIds: z.array(z.string()).min(1),
@@ -298,7 +320,49 @@ app.post('/api/jobs/set', (req, res) => {
     })
   )
     throw Error('Selected files must be ready and belong to this course');
-  res.json(enqueue('set', b.courseId, b));
+  if (b.referenceSourceIds.some((id) => !b.sourceIds.includes(id)))
+    throw Error('Sample exams must be selected uploads.');
+  res.json(enqueue(b.kind, b.courseId, { ...b, variant: id() }));
+});
+app.get('/api/documents/:id', (req, res) => res.json(requireItem('documents', req.params.id)));
+app.get('/api/documents/:id/print', (req, res) => {
+  const doc = requireItem('documents', req.params.id) as StudyDocument;
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; form-action 'none'",
+  );
+  res
+    .type('html')
+    .send(renderDocument(doc, get('courses', doc.courseId)?.name || '', req.query.answers === '1'));
+});
+app.patch('/api/documents/:id', (req, res) => {
+  const doc = requireItem('documents', req.params.id);
+  res.json(
+    put('documents', {
+      ...doc,
+      ...z.object({ archived: z.boolean() }).parse(req.body),
+      updatedAt: now(),
+    }),
+  );
+});
+app.post('/api/documents/:id/generate', (req, res) => {
+  const doc = requireItem('documents', req.params.id) as StudyDocument;
+  const existing = all<Job>('jobs').find(
+    (j) => j.payload?.parentDocumentId === doc.id && ['queued', 'running'].includes(j.status),
+  );
+  if (existing) return res.json(existing);
+  res.json(
+    enqueue(doc.kind, doc.courseId, {
+      courseId: doc.courseId,
+      title: doc.title,
+      sourceIds: doc.sourceIds,
+      referenceSourceIds: doc.referenceSourceIds,
+      instructions: doc.instructions,
+      parentDocumentId: doc.id,
+      variant: id(),
+    }),
+  );
 });
 app.post('/api/sets/:id/review', (req, res) => {
   const set = requireItem('sets', req.params.id) as StudySet;
@@ -316,7 +380,10 @@ app.post('/api/jobs/:id/retry', (req, res) => {
   const j = requireItem('jobs', req.params.id) as Job;
   if (!['failed', 'cancelled'].includes(j.status))
     throw Error('Only failed or cancelled jobs can be retried');
-  const retry = enqueue(j.kind, j.courseId, { ...j.payload, resumeFromJobId: j.id });
+  const options = z.object({ allowQualityWarnings: z.boolean().optional() }).parse(req.body || {});
+  if (options.allowQualityWarnings && j.kind !== 'set')
+    throw Error('Only set jobs can publish with quality notes');
+  const retry = enqueue(j.kind, j.courseId, { ...j.payload, ...options, resumeFromJobId: j.id });
   put('jobs', {
     ...j,
     status: 'retried',
@@ -678,6 +745,7 @@ app.get('/api/export', (_req, res) => {
         'settings',
         'assets',
         'crops',
+        'documents',
       ].map((t) => [t, all(t)]),
     ),
   };

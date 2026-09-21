@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, conversationId TEXT NOT
 CREATE TABLE IF NOT EXISTS settings(id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS assets(id TEXT PRIMARY KEY, data TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS crops(id TEXT PRIMARY KEY, data TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS documents(id TEXT PRIMARY KEY, courseId TEXT NOT NULL REFERENCES courses(id), data TEXT NOT NULL);
 PRAGMA user_version=1;`);
 const tables = new Set([
   'courses',
@@ -39,6 +40,7 @@ const tables = new Set([
   'settings',
   'assets',
   'crops',
+  'documents',
 ]);
 function table(name: string) {
   if (!tables.has(name)) throw Error('Unknown table');
@@ -61,6 +63,7 @@ export function put(name: string, obj: any) {
     sessions: ['setId'],
     attempts: ['cardId', 'sessionId', 'createdAt'],
     messages: ['conversationId'],
+    documents: ['courseId'],
   };
   const cols = ['id', ...(refs[name] || []), 'data'];
   const values = cols.map((k) => (k === 'data' ? JSON.stringify(obj) : obj[k]));

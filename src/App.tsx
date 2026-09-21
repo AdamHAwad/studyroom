@@ -33,6 +33,7 @@ import {
 } from './pages';
 import Study from './Study';
 import UpdateNotice from './components/UpdateNotice';
+import { DocumentPage, DocumentTile } from './Documents';
 type Context = { data: AppData; refresh: () => Promise<void>; newCourse: () => void };
 const Ctx = createContext<Context>(null!);
 export const useApp = () => useContext(Ctx);
@@ -76,7 +77,10 @@ export default function App() {
     );
   const study = /\/sets\/[^/]+\/(flashcards|learn|match|test)$/.test(location.pathname);
   const searchResults = query.trim()
-    ? data.sets
+    ? [
+        ...data.sets.map((s) => ({ ...s, href: `/sets/${s.id}` })),
+        ...(data.documents || []).map((d) => ({ ...d, href: `/documents/${d.id}` })),
+      ]
         .filter((s) => (s.title + ' ' + s.description).toLowerCase().includes(query.toLowerCase()))
         .slice(0, 5)
     : [];
@@ -98,29 +102,26 @@ export default function App() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search your study sets"
-                aria-label="Search your study sets"
+                placeholder="Search your study materials"
+                aria-label="Search your study materials"
               />
               {query && (
                 <div className="search-results">
                   {searchResults.length ? (
                     searchResults.map((s) => (
-                      <Link key={s.id} to={`/sets/${s.id}`}>
+                      <Link key={s.id} to={s.href}>
                         <Layers size={17} />
                         {s.title}
                         <ChevronRight size={16} />
                       </Link>
                     ))
                   ) : (
-                    <p>No matching sets</p>
+                    <p>No matching materials</p>
                   )}
                 </div>
               )}
             </div>
-            <button
-              className="button primary create-top"
-              onClick={() => (data.courses.length ? navigate('/create') : setCourseModal(true))}
-            >
+            <button className="button primary create-top" onClick={() => navigate('/create')}>
               <Plus size={19} />
               Create
             </button>
@@ -199,6 +200,7 @@ export default function App() {
           <Route path="/library" element={<LibraryPage />} />
           <Route path="/courses/:courseId" element={<CoursePage />} />
           <Route path="/sets/:setId" element={<SetPage />} />
+          <Route path="/documents/:documentId" element={<DocumentPage />} />
           <Route path="/sets/:setId/edit" element={<EditSet />} />
           <Route path="/sets/:setId/:mode" element={<Study />} />
           <Route path="/create" element={<CreateSet />} />
@@ -402,12 +404,26 @@ function LibraryPage() {
         </div>
         <Link to="/create" className="button primary">
           <Plus size={18} />
-          Create new set
+          Create new
         </Link>
       </div>
       <div className="tabs">
         <button className={tab === 'sets' ? 'active' : ''} onClick={() => setTab('sets')}>
           Study sets <span>{data.sets.length}</span>
+        </button>
+        <button
+          className={tab === 'practice-exam' ? 'active' : ''}
+          onClick={() => setTab('practice-exam')}
+        >
+          Practice exams{' '}
+          <span>{(data.documents || []).filter((d) => d.kind === 'practice-exam').length}</span>
+        </button>
+        <button
+          className={tab === 'retrieval-packet' ? 'active' : ''}
+          onClick={() => setTab('retrieval-packet')}
+        >
+          Retrieval packets{' '}
+          <span>{(data.documents || []).filter((d) => d.kind === 'retrieval-packet').length}</span>
         </button>
         <button className={tab === 'courses' ? 'active' : ''} onClick={() => setTab('courses')}>
           Courses <span>{data.courses.length}</span>
@@ -423,12 +439,42 @@ function LibraryPage() {
           <div className="filter-search">
             <Search size={18} />
             <input
-              placeholder={`Find a ${tab === 'sets' ? 'study set' : 'course'}`}
+              placeholder={`Find ${tab === 'sets' ? 'a study set' : tab === 'courses' ? 'a course' : tab === 'practice-exam' ? 'a practice exam' : 'a retrieval packet'}`}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
           </div>
-          {tab === 'sets' ? (
+          {['practice-exam', 'retrieval-packet'].includes(tab) ? (
+            (data.documents || []).some((d) => d.kind === tab) ? (
+              <div className="set-grid">
+                {(data.documents || [])
+                  .filter(
+                    (d) => d.kind === tab && d.title.toLowerCase().includes(filter.toLowerCase()),
+                  )
+                  .reverse()
+                  .map((d) => (
+                    <DocumentTile
+                      key={d.id}
+                      document={d}
+                      course={data.courses.find((c) => c.id === d.courseId)}
+                    />
+                  ))}
+              </div>
+            ) : (
+              <Empty
+                title={
+                  tab === 'practice-exam'
+                    ? 'Create your first practice exam'
+                    : 'Create your first retrieval packet'
+                }
+                description="Start with your course materials."
+              >
+                <Link className="button primary" to={`/create?kind=${tab}`}>
+                  Create new
+                </Link>
+              </Empty>
+            )
+          ) : tab === 'sets' ? (
             data.sets.length ? (
               <div className="set-grid">
                 {data.sets

@@ -4349,3 +4349,144 @@ kbd {
 .source-picker input {
   accent-color: var(--blue);
 }
+
+/* Creation uses the same cards and controls as the study-set editor. */
+.create-options {
+  display: grid;
+  gap: 18px;
+  max-width: 780px;
+  margin: 32px 0;
+}
+.create-option {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 28px;
+  border: 1px solid var(--border, #e3e5ed);
+  border-radius: 16px;
+  background: var(--surface, #fff);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.create-option:hover {
+  border-color: #4255ff;
+  box-shadow: 0 3px 16px #4255ff12;
+}
+.create-option:focus-visible {
+  outline: 3px solid #4255ff;
+  outline-offset: 3px;
+}
+.create-option > div {
+  flex: 1;
+}
+.create-option h2 {
+  font-size: 21px;
+  margin: 0 0 6px;
+}
+.create-option p {
+  margin: 0;
+  color: var(--muted, #586380);
+  line-height: 1.5;
+}
+.create-option-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 14px;
+  background: #efedff;
+  color: #5546c9;
+  flex-shrink: 0;
+}
+.sample-checkbox {
+  display: flex !important;
+  align-items: center;
+  gap: 7px;
+  margin: 0 !important;
+  font-size: 12px !important;
+  white-space: nowrap;
+}
+.sample-checkbox input {
+  width: auto !important;
+}
+.document-actions {
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.document-actions .tabs {
+  margin: 0;
+}
+.document-actions > .row {
+  flex-wrap: wrap;
+}
+.document-preview {
+  width: 100%;
+  height: 850px;
+  border: 1px solid #dfe1e8;
+  border-radius: 12px;
+  background: #e9e9ed;
+  margin-top: 12px;
+}
+.document-notes {
+  background: #fff;
+  border: 1px solid #e4e5ec;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin: 16px 0;
+  font-size: 14px;
+}
+.document-notes summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.document-notes p {
+  margin-top: 12px;
+  line-height: 1.6;
+}
+.print-hint {
+  font-size: 14px;
+  color: #586380;
+}
+.editor-page .page-title .text-button {
+  margin-top: 12px;
+}
+.document-page h1 {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 650px) {
+  .create-option {
+    gap: 16px;
+    padding: 20px;
+  }
+  .create-option-icon {
+    width: 44px;
+    height: 44px;
+  }
+  .create-option h2 {
+    font-size: 18px;
+  }
+  .create-option p {
+    font-size: 13px;
+  }
+  .document-actions .button {
+    font-size: 12px;
+    padding: 10px;
+  }
+  .upload-item {
+    flex-wrap: wrap;
+  }
+  .sample-checkbox {
+    margin-left: 36px !important;
+  }
+  .document-preview {
+    height: 700px;
+  }
+  .tabs {
+    overflow-x: auto;
+  }
+}

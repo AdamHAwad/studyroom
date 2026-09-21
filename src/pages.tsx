@@ -35,6 +35,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
 import { useApp } from './App';
+import { DocumentTile } from './Documents';
 import { api, post, patch } from './api';
 import { Modal, Empty, SetTile, JobList, Loading, AgentPill, CourseModal } from './ui';
 import { AgentSettings } from './components/AgentSettings';
@@ -58,6 +59,7 @@ export function CoursePage() {
       />
     );
   const sets = data.sets.filter((s) => s.courseId === course.id);
+  const documents = (data.documents || []).filter((d) => d.courseId === course.id);
   return (
     <div className="page">
       <Link className="breadcrumb" to="/library">
@@ -96,7 +98,7 @@ export function CoursePage() {
       <div className="course-actions">
         <Link to={`/courses/${course.id}/create`} className="button primary">
           <Plus size={19} />
-          Create new set
+          Create new
         </Link>
         <Link to={`/insights?course=${course.id}`} className="button secondary">
           <Sparkles size={18} />
@@ -108,21 +110,30 @@ export function CoursePage() {
           .filter(
             (j) =>
               j.courseId === course.id &&
-              j.kind === 'set' &&
+              ['set', 'practice-exam', 'retrieval-packet'].includes(j.kind) &&
               ['queued', 'running', 'failed', 'cancelled'].includes(j.status),
           )
           .slice(0, 4)}
         refresh={refresh}
       />
       <div className="section-title">
-        <h2>Study sets</h2>
+        <h2>Study materials</h2>
         <span className="muted">Most recent first</span>
       </div>
-      {sets.length ? (
+      {sets.length || documents.length ? (
         <div className="set-grid">
-          {[...sets].reverse().map((s) => (
-            <SetTile key={s.id} set={s} course={course} />
-          ))}
+          {[
+            ...sets.map((s) => ({ type: 'set', item: s })),
+            ...documents.map((d) => ({ type: 'document', item: d })),
+          ]
+            .sort((a, b) => b.item.createdAt.localeCompare(a.item.createdAt))
+            .map(({ type, item }) =>
+              type === 'set' ? (
+                <SetTile key={item.id} set={item as StudySet} course={course} />
+              ) : (
+                <DocumentTile key={item.id} document={item as any} course={course} />
+              ),
+            )}
         </div>
       ) : (
         <Empty
@@ -131,7 +142,7 @@ export function CoursePage() {
           description="Upload your notes, slides, or readings together. Your study agent will build one cohesive set, with references back to the material."
         >
           <Link to={`/courses/${course.id}/create`} className="button primary">
-            Create new set
+            Create new
             <ArrowRight size={18} />
           </Link>
         </Empty>
@@ -287,13 +298,18 @@ export function SetPage() {
         </Link>
       </div>
       {set.description && <p className="set-description">{set.description}</p>}
-      {Boolean(set.warnings?.length) && (
+      {(Boolean(set.warnings?.length) ||
+        ['pending', 'optional'].includes(set.coverage?.qualityReview)) && (
         <details className="notice">
-          <summary>Source and coverage notes · {set.warnings.length}</summary>
+          <summary>
+            {set.warnings.length
+              ? `Source and coverage notes · ${set.warnings.length}`
+              : 'Optional quality review'}
+          </summary>
           {set.warnings.map((w, i) => (
             <p key={i}>{w}</p>
           ))}
-          {set.coverage?.qualityReview === 'pending' && (
+          {['pending', 'optional'].includes(set.coverage?.qualityReview) && (
             <button
               className="button secondary small"
               disabled={reviewBusy}
@@ -312,7 +328,7 @@ export function SetPage() {
                 }
               }}
             >
-              {reviewBusy ? 'Queueing review…' : 'Run quality review when Codex is available'}
+              {reviewBusy ? 'Queueing review…' : 'Run quality review'}
             </button>
           )}
         </details>
@@ -410,11 +426,63 @@ const blankCard = () => ({
   aliases: [] as string[],
   sources: [],
 });
+const creationTypes = [
+  {
+    kind: 'set',
+    title: 'Study Set',
+    description: 'Turn your materials into flashcards, Learn, Match, and Test.',
+    icon: Layers,
+  },
+  {
+    kind: 'practice-exam',
+    title: 'Practice Exam',
+    description: "New questions in the style of your professor's sample exams.",
+    icon: FileText,
+  },
+  {
+    kind: 'retrieval-packet',
+    title: 'Retrieval Packet',
+    description: 'A printable guide with room to recall, define, and make connections.',
+    icon: Pencil,
+  },
+];
 export function CreateSet() {
+  const [params] = useSearchParams();
+  const { courseId } = useParams();
+  const selected = creationTypes.find((t) => t.kind === params.get('kind'));
+  if (selected)
+    return <CreateSetForm key={(courseId || 'new') + selected.kind} kind={selected.kind} />;
+  return (
+    <div className="page editor-page">
+      <div className="page-title">
+        <h1>What would you like to create?</h1>
+        <p>Start with your course materials. Choose how you want to practice.</p>
+      </div>
+      <div className="create-options">
+        {creationTypes.map(({ kind, title, description, icon: Icon }) => (
+          <Link key={kind} to={`?kind=${kind}`} className="create-option">
+            <span className="create-option-icon">
+              <Icon size={28} />
+            </span>
+            <div>
+              <h2>{title}</h2>
+              <p>{description}</p>
+            </div>
+            <ArrowRight size={22} />
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+function CreateSetForm({ kind }: { kind: string }) {
   const { courseId } = useParams();
   const { data, refresh, newCourse } = useApp();
   const navigate = useNavigate();
-  const draftKey = 'studyroom:draft:' + (courseId || 'new');
+  const draftKey = 'studyroom:draft:' + (courseId || 'new') + (kind === 'set' ? '' : ':' + kind);
+  const isSet = kind === 'set';
+  const isExam = kind === 'practice-exam';
+  const label = isSet ? 'study set' : isExam ? 'practice exam' : 'retrieval packet';
   const [draft] = useState<any>(() => {
     try {
       return JSON.parse(localStorage.getItem(draftKey) || '{}');
@@ -426,7 +494,10 @@ export function CreateSet() {
   const [course, setCourse] = useState(draft.course || courseId || data.courses[0]?.id || ''),
     [title, setTitle] = useState(draft.title || ''),
     [instructions, setInstructions] = useState(draft.instructions || ''),
-    [mode, setMode] = useState(draft.mode || 'upload'),
+    [mode, setMode] = useState(isSet ? draft.mode || 'upload' : 'upload'),
+    [referenceSourceIds, setReferenceSourceIds] = useState<string[]>(
+      draft.referenceSourceIds || [],
+    ),
     [files, setFiles] = useState<
       { key: string; name: string; status: string; source?: Source; error?: string }[]
     >(
@@ -450,12 +521,12 @@ export function CreateSet() {
     try {
       localStorage.setItem(
         draftKey,
-        JSON.stringify({ course, title, instructions, mode, files, cards }),
+        JSON.stringify({ course, title, instructions, mode, files, cards, referenceSourceIds }),
       );
     } catch {
       /* Browser storage may be unavailable; server-saved sets remain safe. */
     }
-  }, [course, title, instructions, mode, files, cards, draftKey]);
+  }, [course, title, instructions, mode, files, cards, referenceSourceIds, draftKey]);
   useEffect(() => {
     api<Source[]>('/sources')
       .then((ss) =>
@@ -475,6 +546,8 @@ export function CreateSet() {
       body.append('file', f);
       try {
         const source = await api<Source>(`/courses/${course}/upload`, { method: 'POST', body });
+        if (isExam && /exam|quiz|test/i.test(source.name))
+          setReferenceSourceIds((prev) => [...new Set([...prev, source.id])]);
         setFiles((prev) =>
           prev.map((x) =>
             x.key === key
@@ -500,6 +573,10 @@ export function CreateSet() {
     try {
       if (mode === 'upload') {
         await post('/jobs/set', {
+          kind,
+          referenceSourceIds: referenceSourceIds.filter((id) =>
+            ready.some((f) => f.source?.id === id),
+          ),
           courseId: course,
           title,
           instructions,
@@ -508,7 +585,7 @@ export function CreateSet() {
         await refresh();
         localStorage.removeItem(draftKey);
         navigate(`/courses/${course}`);
-        toast.success('Your study agent is creating the set. You can keep using the app.');
+        toast.success(`Your ${label} is being created. You can keep using the app.`);
       } else {
         const s = await post('/sets', {
           courseId: course,
@@ -548,8 +625,17 @@ export function CreateSet() {
         Back to course
       </Link>
       <div className="page-title">
-        <h1>Create a new study set</h1>
-        <p>Bring the material. We'll help you make it stick.</p>
+        <h1>Create a new {label}</h1>
+        <p>
+          {isSet
+            ? "Bring the material. We'll help you make it stick."
+            : isExam
+              ? 'Upload sample exams and course materials for fresh questions with a familiar format.'
+              : 'Turn your materials into a printable guide with space to write and remember.'}
+        </p>
+        <Link className="text-button" to="?">
+          Change type
+        </Link>
       </div>
       <form onSubmit={submit}>
         <div className="form-card">
@@ -580,24 +666,26 @@ export function CreateSet() {
               </select>
             </label>
           </div>
-          <div className="tabs">
-            <button
-              type="button"
-              className={mode === 'upload' ? 'active' : ''}
-              onClick={() => setMode('upload')}
-            >
-              <Sparkles size={17} />
-              Create from materials
-            </button>
-            <button
-              type="button"
-              className={mode === 'manual' ? 'active' : ''}
-              onClick={() => setMode('manual')}
-            >
-              <Pencil size={17} />
-              Write your own
-            </button>
-          </div>
+          {isSet && (
+            <div className="tabs">
+              <button
+                type="button"
+                className={mode === 'upload' ? 'active' : ''}
+                onClick={() => setMode('upload')}
+              >
+                <Sparkles size={17} />
+                Create from materials
+              </button>
+              <button
+                type="button"
+                className={mode === 'manual' ? 'active' : ''}
+                onClick={() => setMode('manual')}
+              >
+                <Pencil size={17} />
+                Write your own
+              </button>
+            </div>
+          )}
           {mode === 'upload' ? (
             <>
               <div
@@ -623,7 +711,11 @@ export function CreateSet() {
                 <div className="upload-icon">
                   <UploadCloud size={31} />
                 </div>
-                <h3>Drop your materials here</h3>
+                <h3>
+                  {isExam
+                    ? 'Drop sample exams and course materials here'
+                    : 'Drop your materials here'}
+                </h3>
                 <p>
                   or <span>browse files</span> on your device
                 </p>
@@ -653,6 +745,23 @@ export function CreateSet() {
                             : 'Uploading and reading your file…')}
                       </small>
                     </div>
+                    {isExam && f.source && (
+                      <label className="sample-checkbox">
+                        <input
+                          type="checkbox"
+                          aria-label={`Use ${f.name} as a sample exam`}
+                          checked={referenceSourceIds.includes(f.source.id)}
+                          onChange={(e) =>
+                            setReferenceSourceIds((prev) =>
+                              e.target.checked
+                                ? [...new Set([...prev, f.source!.id])]
+                                : prev.filter((id) => id !== f.source!.id),
+                            )
+                          }
+                        />
+                        Sample exam
+                      </label>
+                    )}
                     {f.status === 'uploading' ? (
                       <LoaderCircle className="spin" size={18} />
                     ) : f.status === 'ready' ? (
@@ -697,8 +806,11 @@ export function CreateSet() {
               <div className="gentle-note">
                 <Layers size={18} />
                 <span>
-                  Add as many files as you need. They become one cohesive set, with source
-                  references and useful diagrams.
+                  {isSet
+                    ? 'Add as many files as you need. They become one cohesive set, with source references and useful diagrams.'
+                    : isExam
+                      ? 'Mark sample exams above. They guide the question style and structure. Add lectures, notes, and study guides for broader course coverage.'
+                      : 'About 20 printable pages, with related terms grouped together and brief definitions and room for your explanations and personal examples. Shorter material may need fewer pages.'}
                 </span>
               </div>
             </>
@@ -738,7 +850,7 @@ export function CreateSet() {
             </>
           )}
           <label>
-            {mode === 'upload' ? 'What should the set focus on?' : 'Description'}{' '}
+            {mode === 'upload' ? `What should the ${label} focus on?` : 'Description'}{' '}
             <span className="muted">optional</span>
             <textarea
               maxLength={5000}
@@ -771,7 +883,7 @@ export function CreateSet() {
             ) : (
               <Check size={19} />
             )}{' '}
-            {mode === 'upload' ? 'Create study set' : 'Save study set'}
+            {mode === 'upload' ? `Create ${label}` : 'Save study set'}
           </button>
         </div>
         {mode === 'upload' && (
@@ -1377,12 +1489,12 @@ export function ChatPage() {
 export function SettingsPage() {
   const { data, refresh } = useApp();
   const [settings, setSettings] = useState<any>(null),
-    [archived, setArchived] = useState<any>({ courses: [], sets: [] }),
+    [archived, setArchived] = useState<any>({ courses: [], sets: [], documents: [] }),
     [name, setName] = useState(data.settings.name || '');
   useEffect(() => {
     api('/settings').then(setSettings);
     api('/archive').then(setArchived);
-  }, [data.courses.length, data.sets.length]);
+  }, [data.courses.length, data.sets.length, data.documents?.length]);
   return (
     <div className="page settings-page">
       <div className="page-title">
@@ -1489,10 +1601,11 @@ export function SettingsPage() {
       <AgentSettings />
       <section className="panel">
         <h2>Archived items</h2>
-        <p>Restore a course or study set with its saved progress.</p>
+        <p>Restore a course, study set, exam, or retrieval packet.</p>
         {[
           ...archived.courses.map((c: any) => ({ ...c, kind: 'courses' })),
           ...archived.sets.map((s: any) => ({ ...s, kind: 'sets' })),
+          ...(archived.documents || []).map((d: any) => ({ ...d, kind: 'documents' })),
         ].map((x: any) => (
           <div className="settings-fact" key={x.id}>
             <span>{x.name || x.title}</span>
@@ -1509,9 +1622,9 @@ export function SettingsPage() {
             </button>
           </div>
         ))}
-        {!archived.courses.length && !archived.sets.length && (
-          <p className="muted">Nothing archived.</p>
-        )}
+        {!archived.courses.length &&
+          !archived.sets.length &&
+          !(archived.documents || []).length && <p className="muted">Nothing archived.</p>}
       </section>
     </div>
   );

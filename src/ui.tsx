@@ -214,7 +214,7 @@ export function JobList({ jobs, refresh }: { jobs: Job[]; refresh: () => void })
           </div>
           <div className="grow">
             <strong>
-              {j.kind === 'set'
+              {['set', 'practice-exam', 'retrieval-packet'].includes(j.kind)
                 ? j.payload.title
                 : j.kind === 'review'
                   ? `Quality review · ${j.payload.setId?.slice(0, 8) || 'saved set'}`
@@ -231,18 +231,37 @@ export function JobList({ jobs, refresh }: { jobs: Job[]; refresh: () => void })
                   <div style={{ width: `${j.progress}%` }} />
                 </div>
                 <p>
-                  You can keep studying or leave this page. Your set will appear here when ready.
+                  You can keep studying or leave this page. Your work will appear in this course
+                  when ready.
                 </p>
               </>
             )}
+            {(j as any).requirements?.cardCount &&
+              (() => {
+                const { min, max } = (j as any).requirements.cardCount;
+                if (min === null && max === null) return null;
+                const count =
+                  min !== null && max !== null
+                    ? min === max
+                      ? `Exactly ${min}`
+                      : `${min}–${max}`
+                    : min !== null
+                      ? `At least ${min}`
+                      : `At most ${max}`;
+                return <p className="small muted">Requested set size: {count} cards</p>;
+              })()}
             {Number((j as any).details?.stagedCards) > 0 && (
               <p className="small muted">{(j as any).details.stagedCards} cards ready so far</p>
             )}
             {j.error && <p className="error-text">{j.error}</p>}
           </div>
-          {j.status === 'completed' && j.kind === 'set' ? (
-            <Link className="button secondary small" to={`/sets/${j.resultId}`}>
-              Open set
+          {j.status === 'completed' &&
+          ['set', 'review', 'practice-exam', 'retrieval-packet'].includes(j.kind) ? (
+            <Link
+              className="button secondary small"
+              to={`${['set', 'review'].includes(j.kind) ? '/sets/' : '/documents/'}${j.resultId}`}
+            >
+              {['set', 'review'].includes(j.kind) ? 'Open set' : 'Open document'}
               <ArrowRight size={15} />
             </Link>
           ) : ['failed', 'cancelled'].includes(j.status) ? (

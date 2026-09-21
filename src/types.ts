@@ -96,7 +96,7 @@ export type CardProgress = {
 };
 export type Job = {
   id: string;
-  kind: 'set' | 'chat' | 'review';
+  kind: 'set' | 'chat' | 'review' | 'practice-exam' | 'retrieval-packet';
   courseId: string | null;
   status: string;
   stage: string;
@@ -126,6 +126,7 @@ export type Conversation = {
 export type AppData = {
   courses: Course[];
   sets: StudySet[];
+  documents: StudyDocument[];
   jobs: Job[];
   progress: CardProgress[];
   stats: {
@@ -140,4 +141,76 @@ export type AppData = {
   };
   activity: { date: string; count: number; correct: number }[];
   settings: Record<string, string>;
+};
+
+export type DocumentKind = 'practice-exam' | 'retrieval-packet';
+export type RetrievalTerm = {
+  term: string;
+  topic: string;
+  cue: string;
+  definition: string;
+  example: string;
+  memoryAid: string;
+  compareWith: string;
+  importance: number;
+  refs: string[];
+};
+export type ExamQuestion = {
+  prompt: string;
+  stimulus: string;
+  options: string[];
+  answer: string;
+  explanation: string;
+  points: number;
+  lines: number;
+  refs: string[];
+  visualRef: string;
+  parts: { label: string; prompt: string; answer: string; points: number; lines: number }[];
+};
+export type ExamSection = {
+  title: string;
+  instructions: string;
+  kind: string;
+  count: number;
+  pointsEach: number;
+  questions: ExamQuestion[];
+};
+export type StudyDocument = {
+  id: string;
+  courseId: string;
+  kind: DocumentKind;
+  title: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+  archived: boolean;
+  version: number;
+  sourceIds: string[];
+  referenceSourceIds: string[];
+  instructions: string;
+  generationJobId: string;
+  warnings: string[];
+  content: {
+    overview: string[];
+    essentialQuestions: string[];
+    terms: RetrievalTerm[];
+    omittedTerms: string[];
+    examInstructions: string;
+    durationMinutes: number;
+    style: {
+      font: 'serif' | 'sans-serif';
+      columns: number;
+      optionLayout: 'stacked' | 'inline';
+      headingCase: 'normal' | 'uppercase';
+    };
+    sections: ExamSection[];
+    evidence: {
+      ref: string;
+      sourceId: string;
+      name: string;
+      locator: string;
+      text: string;
+      assetId?: string;
+    }[];
+  };
 };
